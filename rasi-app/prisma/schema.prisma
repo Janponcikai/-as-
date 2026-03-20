@@ -1,0 +1,282 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── TENANT ───────────────────────────────────────────────
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  plan      String   @default("FREE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users        User[]
+  positions    Position[]
+  processMaps  ProcessMap[]
+  processes    Process[]
+  subProcesses SubProcess[]
+  steps        ProcessStep[]
+  rasiMatrices RasiMatrix[]
+  attachments  Attachment[]
+  bugReports   BugReport[]
+  auditLogs    AuditLog[]
+  checklists   ChecklistInstance[]
+}
+
+// ─── USER ─────────────────────────────────────────────────
+model User {
+  id               String    @id @default(cuid())
+  tenantId         String
+  email            String
+  passwordHash     String
+  name             String
+  role             UserRole  @default(VIEWER)
+  positionId       String?
+  resetToken       String?
+  resetTokenExpiry DateTime?
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id])
+  position       Position?       @relation(fields: [positionId], references: [id])
+  bugReports     BugReport[]
+  auditLogs      AuditLog[]
+  checklistsDone ChecklistItem[]
+
+  @@unique([tenantId, email])
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+// ─── POSITION ─────────────────────────────────────────────
+model Position {
+  id         String @id @default(cuid())
+  tenantId   String
+  name       String
+  code       String
+  department String
+
+  tenant   Tenant      @relation(fields: [tenantId], references: [id])
+  users    User[]
+  rasiRows RasiRow[]
+
+  @@unique([tenantId, code])
+}
+
+// ─── LEVEL 1: PROCESS MAP ─────────────────────────────────
+model ProcessMap {
+  id       String         @id @default(cuid())
+  tenantId String
+  name     String
+  type     ProcessMapType
+  order    Int            @default(0)
+  isActive Boolean        @default(true)
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  processes Process[]
+}
+
+enum ProcessMapType {
+  MANAGING
+  CORE
+  SUPPORTING
+}
+
+// ─── LEVEL 2: PROCESS ─────────────────────────────────────
+model Process {
+  id           String  @id @default(cuid())
+  tenantId     String
+  processMapId String
+  name         String
+  code         String
+  description  String?
+  order        Int     @default(0)
+
+  tenant       Tenant              @relation(fields: [tenantId], references: [id])
+  processMap   ProcessMap          @relation(fields: [processMapId], references: [id])
+  subProcesses SubProcess[]
+  checklists   ChecklistInstance[]
+
+  @@unique([tenantId, code])
+}
+
+// ─── LEVEL 3: SUB-PROCESS ─────────────────────────────────
+model SubProcess {
+  id        String @id @default(cuid())
+  tenantId  String
+  processId String
+  name      String
+  code      String
+  order     Int    @default(0)
+  flowData  Json?
+
+  tenant  Tenant        @relation(fields: [tenantId], references: [id])
+  process Process       @relation(fields: [processId], references: [id])
+  steps   ProcessStep[]
+
+  @@unique([tenantId, code])
+}
+
+// ─── LEVEL 4: PROCESS STEP ────────────────────────────────
+model ProcessStep {
+  id           String   @id @default(cuid())
+  tenantId     String
+  subProcessId String
+  name         String
+  code         String
+  order        Int      @default(0)
+  type         StepType @default(STEP)
+  input        String?
+  output       String?
+  description  String?
+  linkedStepId String?
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id])
+  subProcess  SubProcess      @relation(fields: [subProcessId], references: [id])
+  rasiMatrix  RasiMatrix?
+  attachments Attachment[]
+  checklist   ChecklistItem[]
+
+  @@unique([tenantId, code])
+}
+
+enum StepType {
+  STEP
+  GATE
+  DECISION
+}
+
+// ─── RASI MATRIX ──────────────────────────────────────────
+model RasiMatrix {
+  id       String @id @default(cuid())
+  tenantId String
+  stepId   String @unique
+
+  tenant Tenant      @relation(fields: [tenantId], references: [id])
+  step   ProcessStep @relation(fields: [stepId], references: [id])
+  rows   RasiRow[]
+}
+
+model RasiRow {
+  id           String  @id @default(cuid())
+  rasiMatrixId String
+  positionId   String
+  responsible  Boolean @default(false)
+  approve      Boolean @default(false)
+  support      Boolean @default(false)
+  inform       Boolean @default(false)
+
+  matrix   RasiMatrix @relation(fields: [rasiMatrixId], references: [id])
+  position Position   @relation(fields: [positionId], references: [id])
+
+  @@unique([rasiMatrixId, positionId])
+}
+
+// ─── ATTACHMENT ───────────────────────────────────────────
+model Attachment {
+  id         String   @id @default(cuid())
+  tenantId   String
+  stepId     String
+  name       String
+  url        String
+  fileType   String
+  fileSize   Int
+  uploadedBy String
+  createdAt  DateTime @default(now())
+
+  tenant Tenant      @relation(fields: [tenantId], references: [id])
+  step   ProcessStep @relation(fields: [stepId], references: [id])
+}
+
+// ─── BUG REPORT ───────────────────────────────────────────
+model BugReport {
+  id          String          @id @default(cuid())
+  tenantId    String
+  userId      String
+  type        BugReportType
+  description String
+  pageUrl     String
+  browserInfo String?
+  status      BugReportStatus @default(OPEN)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+}
+
+enum BugReportType {
+  TEXT_ERROR
+  LOGIC_ERROR
+  APP_BUG
+}
+
+enum BugReportStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+// ─── AUDIT LOG ────────────────────────────────────────────
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String
+  userId     String
+  action     String
+  entityType String
+  entityId   String
+  oldValue   Json?
+  newValue   Json?
+  createdAt  DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+}
+
+// ─── CHECKLIST ────────────────────────────────────────────
+model ChecklistInstance {
+  id        String          @id @default(cuid())
+  tenantId  String
+  processId String
+  createdBy String
+  name      String
+  status    ChecklistStatus @default(ACTIVE)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  tenant  Tenant          @relation(fields: [tenantId], references: [id])
+  process Process         @relation(fields: [processId], references: [id])
+  items   ChecklistItem[]
+}
+
+model ChecklistItem {
+  id         String    @id @default(cuid())
+  instanceId String
+  stepId     String
+  positionId String?
+  rasiRole   String
+  isDone     Boolean   @default(false)
+  doneBy     String?
+  doneAt     DateTime?
+
+  instance ChecklistInstance @relation(fields: [instanceId], references: [id])
+  step     ProcessStep       @relation(fields: [stepId], references: [id])
+  doneUser User?             @relation(fields: [doneBy], references: [id])
+}
+
+enum ChecklistStatus {
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
